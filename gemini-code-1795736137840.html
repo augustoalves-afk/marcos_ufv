@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Web GIS - Pontos Geodésicos</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Arial, sans-serif; }
+    html, body, #map { width: 100%; height: 100%; }
+    .popup-simples { text-align: center; padding: 4px 2px; min-width: 150px; }
+    .popup-simples h3 { font-size: 16px; color: #1b365d; margin-bottom: 10px; }
+    .btn-mais-info {
+      display: inline-block; padding: 7px 14px; background: #1a73e8;
+      color: #ffffff !important; text-decoration: none; border-radius: 4px;
+      font-size: 13px; font-weight: 600;
+    }
+    .btn-mais-info:hover { background: #1557b0; }
+    #status-badge {
+      position: absolute; bottom: 15px; left: 15px; z-index: 1000;
+      background: rgba(255, 255, 255, 0.92); padding: 6px 12px;
+      border-radius: 6px; font-size: 12px; font-weight: 600; color: #1b365d;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+    }
+  </style>
+</head>
+<body>
+  <div id="status-badge">⏳ A carregar pontos...</div>
+  <div id="map"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+  <script>
+    const URL_PLANILHA_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSMiqDy2shoCqwuIuY0rOJdwFIdohxTTFVVXuxRR3OGPTyrtinqD1kjuAlwg1lsq6sQ3k5OyZIVvQct/pub?gid=502186142&single=true&output=csv";
+
+    const map = L.map('map').setView([-20.7608, -42.8692], 14);
+    const satelite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: '© Esri' }).addTo(map);
+    const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' });
+    L.control.layers({ "Satélite": satelite, "Mapa": osm }).addTo(map);
+
+    const badge = document.getElementById("status-badge");
+
+    fetch(URL_PLANILHA_CSV)
+      .then(response => {
+        if (!response.ok) throw new Error("Erro HTTP " + response.status);
+        return response.text();
+      })
+      .then(csvText => {
+        const parsed = Papa.parse(csvText, {
+          header: true,
+          skipEmptyLines: true,
+          transformHeader: h => h.trim().toLowerCase()
+        });
+
+        const bounds = [];
+        let contador = 0;
+
+        parsed.data.forEach(ponto => {
+          const lat = parseFloat(String(ponto.latitude || "").replace(",", ".").trim());
+          const lon = parseFloat(String(ponto.longitude || "").replace(",", ".").trim());
+          const codigo = (ponto.codigo || "").trim().toUpperCase();
+          const link = (ponto.link_pdf || "").trim();
+
+          if (!isNaN(lat) && !isNaN(lon) && codigo) {
+            const botao = link.startsWith("http")
+              ? `<a href="${link}" target="_blank" rel="noopener noreferrer" class="btn-mais-info">Mais informações</a>`
+              : `<span style="font-size:12px; color:#777;">Link indisponível</span>`;
+
+            L.marker([lat, lon])
+              .addTo(map)
+              .bindPopup(`<div class="popup-simples"><h3>${codigo}</h3>${botao}</div>`)
+              .bindTooltip(codigo);
+
+            bounds.push([lat, lon]);
+            contador++;
+          }
+        });
+
+        if (contador > 0) {
+          badge.innerText = `📍 ${contador} pontos carregados`;
+          map.fitBounds(bounds, { padding: [40, 40] });
+        } else {
+          badge.innerText = "⚠️ Planilha lida, mas 0 coordenadas válidas encontradas.";
+          console.log("Primeira linha lida:", parsed.data[0]);
+        }
+      })
+      .catch(err => {
+        badge.innerText = "❌ Bloqueado localmente — sobe no Netlify para testar!";
+        console.error(err);
+      });
+  </script>
+</body>
+</html>

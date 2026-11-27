@@ -25,16 +25,14 @@
   </style>
 </head>
 <body>
-  <div id="status-badge">⏳ Carregando pontos e ortomosaico...</div>
+  <div id="status-badge">⏳ Carregando pontos...</div>
   <div id="map"></div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
-  <script src="https://unpkg.com/georaster@1.6.0/dist/georaster.browser.bundle.min.js"></script>
-  <script src="https://unpkg.com/georaster-layer-for-leaflet@3.10.0/dist/v3/webpack/bundle/georaster-layer-for-leaflet.min.js"></script>
   <script>
     const URL_PLANILHA_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSMiqDy2shoCqwuIuY0rOJdwFIdohxTTFVVXuxRR3OGPTyrtinqD1kjuAlwg1lsq6sQ3k5OyZIVvQct/pub?gid=502186142&single=true&output=csv";
-    const URL_ORTOMOSAICO = "https://huggingface.co/datasets/alvesguto19/ortomosaico-ufv/resolve/main/ortomosaico_cog.tif";
+    const URL_COG = encodeURIComponent("https://huggingface.co/datasets/alvesguto19/ortomosaico-ufv/resolve/main/ortomosaico_cog.tif");
 
     const map = L.map('map', { maxZoom: 22 }).setView([-20.7608, -42.8692], 14);
     
@@ -50,39 +48,23 @@
       maxZoom: 22
     });
 
-    const controleCamadas = L.control.layers({ "Satélite": satelite, "Mapa": osm }, {}).addTo(map);
+    // Camada do Ortomosaico UFV via Titiler (streaming nativo em tiles PNG)
+    const camadaOrto = L.tileLayer(`https://titiler.xyz/cog/tiles/WebMercatorQuad/{z}/{x}/{y}.png?url=${URL_COG}`, {
+      attribution: 'Ortomosaico UFV (10cm)',
+      maxNativeZoom: 21,
+      maxZoom: 22,
+      opacity: 1
+    }).addTo(map);
+
+    // Controle de camadas (base + sobreposição)
+    L.control.layers(
+      { "Satélite": satelite, "Mapa": osm },
+      { "Ortomosaico UFV (10cm)": camadaOrto }
+    ).addTo(map);
 
     const badge = document.getElementById("status-badge");
-    let textoPontos = "⏳ Carregando pontos...";
-    let textoOrto = "⏳ Carregando ortomosaico...";
 
-    function atualizarStatus() {
-      badge.innerText = `${textoPontos} | ${textoOrto}`;
-    }
-    atualizarStatus();
-
-    // 1. Carregar Ortomosaico COG direto do Hugging Face (resolução 10cm)
-    parseGeoraster(URL_ORTOMOSAICO)
-      .then(georaster => {
-        const camadaOrto = new GeoRasterLayer({
-          georaster: georaster,
-          opacity: 1,
-          resolution: 128,
-          debugLevel: 0
-        });
-
-        camadaOrto.addTo(map);
-        controleCamadas.addOverlay(camadaOrto, "Ortomosaico UFV (10cm)");
-        textoOrto = "🛰️ Ortomosaico ativo";
-        atualizarStatus();
-      })
-      .catch(err => {
-        textoOrto = "⚠️ Erro no ortomosaico";
-        atualizarStatus();
-        console.error("Erro ao carregar ortomosaico:", err);
-      });
-
-    // 2. Carregar Pontos Geodésicos do CSV
+    // Carregar Pontos Geodésicos do CSV
     fetch(URL_PLANILHA_CSV)
       .then(response => {
         if (!response.ok) throw new Error("Erro HTTP " + response.status);
@@ -120,16 +102,14 @@
         });
 
         if (contador > 0) {
-          textoPontos = `📍 ${contador} pontos`;
+          badge.innerText = `📍 ${contador} pontos | 🛰️ Ortomosaico 10cm`;
           map.fitBounds(bounds, { padding: [40, 40] });
         } else {
-          textoPontos = "⚠️ 0 pontos válidos";
+          badge.innerText = "⚠️ 0 pontos válidos encontrados.";
         }
-        atualizarStatus();
       })
       .catch(err => {
-        textoPontos = "❌ Erro ao ler planilha";
-        atualizarStatus();
+        badge.innerText = "❌ Erro ao ler planilha";
         console.error(err);
       });
   </script>

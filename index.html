@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Arial, sans-serif; }
-    html, body, #map { width: 100%; height: 100%; }
+    html, body, #map { width: 100%; height: 100%; background: #f0f2f5; }
     .popup-simples { text-align: center; padding: 4px 2px; min-width: 150px; }
     .popup-simples h3 { font-size: 16px; color: #1b365d; margin-bottom: 10px; }
     .btn-mais-info {
@@ -16,6 +16,32 @@
       font-size: 13px; font-weight: 600;
     }
     .btn-mais-info:hover { background: #1557b0; }
+
+    /* Ícone do triângulo geodésico */
+    .custom-marco-triangulo { background: transparent; border: none; cursor: pointer; }
+
+    /* Rótulo permanente estilo monografia (sem bloquear o clique no triângulo) */
+    .label-monografia {
+      pointer-events: none !important;
+      background: transparent !important;
+      border: none !important;
+      box-shadow: none !important;
+      color: #111111;
+      font-weight: 700;
+      font-size: 12px;
+      padding: 0;
+      text-shadow:
+        -1.5px -1.5px 0 #ffffff,
+         1.5px -1.5px 0 #ffffff,
+        -1.5px  1.5px 0 #ffffff,
+         1.5px  1.5px 0 #ffffff,
+         0px   -1.5px 0 #ffffff,
+         0px    1.5px 0 #ffffff,
+        -1.5px  0px   0 #ffffff,
+         1.5px  0px   0 #ffffff;
+    }
+    .label-monografia::before { display: none !important; }
+
     #status-badge {
       position: absolute; bottom: 15px; left: 15px; z-index: 1000;
       background: rgba(255, 255, 255, 0.92); padding: 6px 12px;
@@ -36,19 +62,14 @@
 
     const map = L.map('map', { maxZoom: 22 }).setView([-20.7608, -42.8692], 14);
     
-    const satelite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-      attribution: '© Esri',
+    // Mapa de ruas base
+    const mapaBase = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap',
       maxNativeZoom: 19,
       maxZoom: 22
     }).addTo(map);
 
-    const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '© OpenStreetMap',
-      maxNativeZoom: 19,
-      maxZoom: 22
-    });
-
-    // Camada do Ortomosaico UFV via Titiler (streaming nativo em tiles PNG)
+    // Ortomosaico UFV (10cm)
     const camadaOrto = L.tileLayer(`https://titiler.xyz/cog/tiles/WebMercatorQuad/{z}/{x}/{y}.png?url=${URL_COG}`, {
       attribution: 'Ortomosaico UFV (10cm)',
       maxNativeZoom: 21,
@@ -56,27 +77,31 @@
       opacity: 1
     }).addTo(map);
 
-    // Controle de camadas (base + sobreposição)
     L.control.layers(
-      { "Satélite": satelite, "Mapa": osm },
+      { "Mapa Base": mapaBase },
       { "Ortomosaico UFV (10cm)": camadaOrto }
     ).addTo(map);
+
+    // Ícone de triângulo fechado vermelho com contorno branco
+    const iconeTriangulo = L.divIcon({
+      className: 'custom-marco-triangulo',
+      html: `<svg width="16" height="16" viewBox="0 0 16 16">
+               <polygon points="8,2 14.5,13.5 1.5,13.5" fill="#d91e18" stroke="#ffffff" stroke-width="1.5" stroke-linejoin="round"/>
+             </svg>`,
+      iconSize: [55, 55],
+      iconAnchor: [8, 9.5],
+      popupAnchor: [0, -8]
+    });
 
     const badge = document.getElementById("status-badge");
 
     // Carregar Pontos Geodésicos do CSV
-    fetch(URL_PLANILHA_CSV)
-      .then(response => {
-        if (!response.ok) throw new Error("Erro HTTP " + response.status);
-        return response.text();
-      })
-      .then(csvText => {
-        const parsed = Papa.parse(csvText, {
-          header: true,
-          skipEmptyLines: true,
-          transformHeader: h => h.trim().toLowerCase()
-        });
-
+    Papa.parse(URL_PLANILHA_CSV, {
+      download: true,
+      header: true,
+      skipEmptyLines: true,
+      transformHeader: h => h.trim().toLowerCase(),
+      complete: function(parsed) {
         const bounds = [];
         let contador = 0;
 
@@ -84,17 +109,33 @@
           const lat = parseFloat(String(ponto.latitude || "").replace(",", ".").trim());
           const lon = parseFloat(String(ponto.longitude || "").replace(",", ".").trim());
           const codigo = (ponto.codigo || "").trim().toUpperCase();
-          const link = (ponto.link_pdf || "").trim();
+
+          // Busca o link do Drive em qualquer coluna da planilha que comece com http
+          const link = (
+            ponto.link_pdf ||
+            ponto.link ||
+            ponto.drive ||
+            ponto.pdf ||
+            ponto.url ||
+            ponto.monografia ||
+            Object.values(ponto).find(v => String(v).trim().startsWith("http")) ||
+            ""
+          ).trim();
 
           if (!isNaN(lat) && !isNaN(lon) && codigo) {
             const botao = link.startsWith("http")
               ? `<a href="${link}" target="_blank" rel="noopener noreferrer" class="btn-mais-info">Mais informações</a>`
               : `<span style="font-size:12px; color:#777;">Link indisponível</span>`;
 
-            L.marker([lat, lon])
+            L.marker([lat, lon], { icon: iconeTriangulo })
               .addTo(map)
               .bindPopup(`<div class="popup-simples"><h3>${codigo}</h3>${botao}</div>`)
-              .bindTooltip(codigo);
+              .bindTooltip(codigo, {
+                permanent: true,
+                direction: 'right',
+                offset: [6, -4],
+                className: 'label-monografia'
+              });
 
             bounds.push([lat, lon]);
             contador++;
@@ -107,11 +148,12 @@
         } else {
           badge.innerText = "⚠️ 0 pontos válidos encontrados.";
         }
-      })
-      .catch(err => {
+      },
+      error: function(err) {
         badge.innerText = "❌ Erro ao ler planilha";
         console.error(err);
-      });
+      }
+    });
   </script>
 </body>
 </html>

@@ -25,21 +25,66 @@
   </style>
 </head>
 <body>
-  <div id="status-badge">⏳ A carregar pontos...</div>
+  <div id="status-badge">⏳ A carregar pontos e ortomosaico...</div>
   <div id="map"></div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+  <script src="https://unpkg.com/georaster"></script>
+  <script src="https://unpkg.com/georaster-layer-for-leaflet"></script>
   <script>
     const URL_PLANILHA_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSMiqDy2shoCqwuIuY0rOJdwFIdohxTTFVVXuxRR3OGPTyrtinqD1kjuAlwg1lsq6sQ3k5OyZIVvQct/pub?gid=502186142&single=true&output=csv";
+    
+    // ⚠️ CONFIRME O NOME EXATO DO ARQUIVO .TIF QUE VOCÊ SUBIU NO GITHUB:
+    const URL_ORTOMOSAICO = "./ortomosaico_github.tif";
 
-    const map = L.map('map').setView([-20.7608, -42.8692], 14);
-    const satelite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: '© Esri' }).addTo(map);
-    const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' });
-    L.control.layers({ "Satélite": satelite, "Mapa": osm }).addTo(map);
+    const map = L.map('map', { maxZoom: 22 }).setView([-20.7608, -42.8692], 14);
+    
+    const satelite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+      attribution: '© Esri',
+      maxNativeZoom: 19,
+      maxZoom: 22
+    }).addTo(map);
+
+    const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap',
+      maxNativeZoom: 19,
+      maxZoom: 22
+    });
+
+    // Controle único de camadas (base + sobreposição do ortomosaico)
+    const controleCamadas = L.control.layers({ "Satélite": satelite, "Mapa": osm }, {}).addTo(map);
 
     const badge = document.getElementById("status-badge");
+    let textoPontos = "⏳ Carregando pontos...";
+    let textoOrto = "⏳ Carregando ortomosaico...";
 
+    function atualizarStatus() {
+      badge.innerText = `${textoPontos} | ${textoOrto}`;
+    }
+    atualizarStatus();
+
+    // 1. Carregar Ortomosaico COG
+    parseGeoraster(URL_ORTOMOSAICO)
+      .then(georaster => {
+        const camadaOrto = new GeoRasterLayer({
+          georaster: georaster,
+          opacity: 1,
+          resolution: 256
+        });
+
+        camadaOrto.addTo(map);
+        controleCamadas.addOverlay(camadaOrto, "Ortomosaico UFV");
+        textoOrto = "🛰️ Ortomosaico ativo";
+        atualizarStatus();
+      })
+      .catch(err => {
+        textoOrto = "⚠️ Erro no ortomosaico";
+        atualizarStatus();
+        console.error("Erro ao carregar ortomosaico:", err);
+      });
+
+    // 2. Carregar Pontos Geodésicos do CSV
     fetch(URL_PLANILHA_CSV)
       .then(response => {
         if (!response.ok) throw new Error("Erro HTTP " + response.status);
@@ -77,15 +122,17 @@
         });
 
         if (contador > 0) {
-          badge.innerText = `📍 ${contador} pontos carregados`;
+          textoPontos = `📍 ${contador} pontos`;
           map.fitBounds(bounds, { padding: [40, 40] });
         } else {
-          badge.innerText = "⚠️ Planilha lida, mas 0 coordenadas válidas encontradas.";
+          textoPontos = "⚠️ 0 pontos válidos";
           console.log("Primeira linha lida:", parsed.data[0]);
         }
+        atualizarStatus();
       })
       .catch(err => {
-        badge.innerText = "❌ Bloqueado localmente — sobe no Netlify para testar!";
+        textoPontos = "❌ Erro ao ler planilha";
+        atualizarStatus();
         console.error(err);
       });
   </script>
